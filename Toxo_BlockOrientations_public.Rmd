@@ -155,6 +155,20 @@ combo_ones <- filter(combination_pairs_single, n == 1)
 combination_pairs_filter <- filter(combination_pairs, n > cutoff)
 combination_pairs_filter_single <- filter(combination_pairs_single, n > cutoff)
 
+combination_table_supplement <- combination_pairs %>%
+  separate_wider_delim(block1, delim = "_", names = c("a", "b")) %>% 
+  separate_wider_delim(block2, delim = "_", names = c("c", "d")) %>% 
+  mutate(group = case_when(
+    b == d ~ "head-tail",
+    b == "reverse" & d == "forward" ~ "tail-tail",
+    b == "forward" & d == "reverse" ~ "head-head",
+    .default = "miss"
+    )
+    ) %>% 
+  filter(group == "head-tail" & b == "forward" | group != "head-tail") %>% 
+  distinct(n, group, .keep_all = T) %>% 
+  select(block1 = a, direction1 = b, block2 = c, direction2 = d, n, group) %>% 
+  arrange(desc(n))
 
 ```
 
@@ -225,8 +239,10 @@ ht <-
             }
   )
 print(ht)
+
+
 ```
-Note that in the heatmap, the directionality is indicated by superscript numbers, ² indicates head to head, ³ tail to tail orientation, while head to tail orientations are not further indicated.  
+Note that in the heatmap, the directionality is indicated by superscript numbers, ² indicates head to head, ³ tail to tail orientation, while head to tail orientation is not further indicated.  
 
 # ORF percentage analysis
 
@@ -272,6 +288,21 @@ orf_percentage <- orfs_annotated %>%
             all = sum(all_orf) / sum(read_len >= 3318)
             )
 
+orf_supplement_table <- orfs_annotated %>% 
+  select(coxI, coxIII, cob) %>% 
+  pivot_longer(cols = c(coxI, coxIII, cob)) %>% 
+  group_by(name) %>%
+  summarise(n = sum(value)) %>% 
+  mutate(length = case_when(
+    name == "coxI" ~ 1476,
+    name == "coxIII" ~ 735,
+    name == "cob" ~ 1107),
+    possible_reads = sapply(length, function(x) length(orfs$read_len[orfs$read_len >= x])),
+    frequency = n / possible_reads) %>% 
+  select(ORF = name, length, possible_reads, found_reads = n, frequency)
+
+write.csv(orf_supplement_table, file = "ORF_supplement_table.csv", row.names = F)
+
 orf_bonus <- orfs_annotated %>% 
   select(read_len, coxI_n, coxIII_n, cob_n, all_orf_n) %>% 
   pivot_longer(cols = c(coxI_n, coxIII_n, cob_n, all_orf_n)) %>% 
@@ -311,7 +342,7 @@ get_existing_combinations <- function(blocks, n) {
   unlist(combinations)
 }
 
-# Extract existing three and four block combinations (ignoring 'X' containing combinations)
+# Extract existing three, four and five block combinations (ignoring 'X' containing combinations)
 existing_three_block_combinations <- get_existing_combinations(blocks, 3) %>% 
   unique()
 existing_four_block_combinations <- get_existing_combinations(blocks, 4) %>% 

@@ -1,0 +1,353 @@
+---
+title: "Toxo_BlockOrientations_public"
+author: "Sascha Maschmann"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    depth: 2
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(stringi)
+library(stringr)
+library(ComplexHeatmap)
+library(circlize)
+library(parallel)
+
+# Enables parallel processing with the max number of cores available, on Windows machines this should do nothing but the code should run fine anyways.
+cores <- parallel::detectCores()
+```
+
+## Overview
+
+Nanopore sequencing was performed on Toxoplasma gondii mitochondrial DNA.  
+According to earlier publications, the toxoplasma mitochondrial genome is composed of various coding blocks that encode either parts of one of three ORFs or various sRNAs, possibly parts of the mito-ribosome.  
+Those coding blocks were mapped to the nanopore sequencing results, due to the read quality of the sequencing method, blocks were called with a 75% sequence similarity threshhold.  
+
+# Data read in
+
+The mapping was done with Geneious, the mapped features including their start and end positions and direction were exported as .tsv
+
+```{r data import}
+raw <- read.delim("finalMitoReads_annotations.tsv")
+```
+
+## Separate Reads
+
+The Reads are separated by sequenced molecule.
+```{r separate reads}
+reads <- select(raw, -X5truncated, -X3truncated, -Length) %>%
+  group_by(Sequence.Name) %>% 
+  group_split()
+
+```
+
+# Block combinations
+
+To identify two block combinations on the reads, first, each mapping is checked for length, if it does contain less than 2 annotated blocks, the sequence is ignored. Subsequently, the distance between annotated block is calculated, since the mapping was done with a relatively low sequence similarity threshold, the mapped block overlap sometimes. For combination calling, the absolute distance has to be less or equal to 10, so the overlap *or* distance between two blocks can't be more than 10 bases to be considered a combination. 
+
+```{r identify combinations}
+
+create_combinations <- function(df){
+  # if there are at least two block annotated in a read 
+  if (nrow(df) > 1){
+      ph <- df %>% 
+        mutate(distance = abs(lead(Minimum) - Maximum),
+               combo = paste(Name, Direction, lead(Name), lead(Direction)),
+               combo = ifelse(is.na(distance), NA, combo),
+               combo = ifelse(distance > 10, NA, combo)
+               )
+      return(ph)
+  } else{
+    df <- NULL
+    return(df)
+  }
+}
+
+combination_list <- mclapply(reads, create_combinations, mc.cores = cores) 
+
+combination_df <- bind_rows(combination_list)
+
+combination_occurrence <- combination_df %>% 
+  select(combo) %>% 
+  filter(!is.na(combo)) %>% 
+  group_by(combo) %>% 
+  summarise(n = n()) %>% 
+  ungroup() %>% 
+  # Block and Order combinations are separated and added to placeholder columns a to d
+  separate_wider_delim(combo, delim = " ", names = c("a", "b", "c", "d")) %>% 
+  mutate(block1 = paste0(a, "_", b),
+         block2 = paste0(c, "_", d))
+```
+
+## Directionality
+
+Since single strand DNA was sequenced, blocks can be encoded either on the sequenced strand or on the reverse complement. This influences the way, block combinations can be interpreted, since a block might serve different biological uses depending on its orientation and its neighboring blocks. In the available data, this information is encoded as a single letter plus for the keyword forward or reverse.  
+Some combinations that are technically the same can not be combined easily. For example, in one read one might find the combination A forward, B forward, on a different read the combination B reverse, A reverse. Those two are essentially the same, in one case, the information was stored on the sequenced strand in the other on the reverse complement.  
+To combine these cases, each block is assigned an unique word. Subsequently, the word is reversed, if the block was annotated reversed. Then, the words are concatenated in the order they appear in the read, and a reversed copy of that combination is additionally created.  
+To combine occurrence counts of blocks that are essentially identical just on different read directions, occurrences are summed up, if the combined word of line a is identical to the reversed combined word of line b.  
+
+```{r}
+# Create a vector of names
+names_vector <- unique(combination_occurrence$a)
+
+# Create a vector of distinct words corresponding to the names
+words_vector <- c("Apple", "Banana", "Cherry", "Dolphin", "Elephant", "Fox", "Grapes", "Horse", "Iguana", "Jaguar", "Kangaroo", "Koala", "Lion", "Monkey", "Mango", "Nectarine", "Octopus", "Penguin", "Quokka", "Raccoon", "Sloth", "Tiger", "Umbrella", "Vulture")
+
+# Create a named list using the names and words
+names_list <- setNames(words_vector, names_vector)
+
+combo_wombo <- combination_occurrence %>% 
+  mutate(a = names_list[a],
+         c = names_list[c],
+         a = ifelse(b == "reverse", stri_reverse(a), a),
+         c = ifelse(d == "reverse", stri_reverse(c), c),
+         e = paste0(a, c),
+         e2 = stri_reverse(e),
+         pair = NA)
+
+for (i in (unique(combo_wombo$e))){
+  combo_wombo <- combo_wombo %>% 
+    mutate(pair = ifelse(e == i, i, pair),
+           pair = ifelse(e2 == i, i, pair))
+}
+
+combination_pairs <- combo_wombo %>% 
+  select(pair, block1, block2, n) %>% 
+  group_by(pair) %>% 
+  reframe(n = sum(n),
+          block1 = (block1),
+          block2 = (block2)) %>% 
+  select(block1, block2, n) %>% 
+  arrange(desc(n))
+```
+
+```{r}
+cutoff = 50
+
+combination_pairs <- combo_wombo %>% 
+  select(pair, block1, block2, n) %>% 
+  group_by(pair) %>% 
+  reframe(n = sum(n),
+          block1 = (block1),
+          block2 = (block2)) %>% 
+  select(block1, block2, n) %>% 
+  arrange(desc(n))
+
+combination_pairs_single <- combo_wombo %>% 
+  select(pair, block1, block2, n) %>% 
+  group_by(pair) %>% 
+  summarise(n = sum(n),
+          block1 = first(block1),
+          block2 = first(block2)) %>% 
+  select(block1, block2, n) %>% 
+  arrange(desc(n))
+
+removed_combos <- filter(combination_pairs_single, n < cutoff)
+combo_ones <- filter(combination_pairs_single, n == 1)
+combination_pairs_filter <- filter(combination_pairs, n > cutoff)
+combination_pairs_filter_single <- filter(combination_pairs_single, n > cutoff)
+
+
+```
+
+To remove presumed mapping artifacts or errors from the data, combinations that occur less than `r cutoff` times, are removed from the dataset, but for reference, `r nrow(removed_combos)` combinations were removed, `r nrow(combo_ones)` of which only appeared once, the most common removed combination appeared `r max(removed_combos$n)` times, the rarest included combination `r min(combination_pairs_filter_single$n)` times. In total, `r nrow(combination_pairs_single)` different combinations were found.  
+In total, `r sum(combination_pairs_single$n)` pairings were identified, the removed, rarely occurring combinations sum to a total of `r sum(removed_combos$n)` or `r (sum(removed_combos$n)/sum(combination_pairs_single$n))*100` percent of total identified pairs.
+
+```{r plot combinations}
+print(combination_pairs_filter)
+
+combination_split <- combination_pairs_filter %>% 
+  separate_wider_delim(block1, delim = "_", names = c("a", "b")) %>% 
+  separate_wider_delim(block2, delim = "_", names = c("c", "d")) %>% 
+  mutate(group = case_when(
+    b == d ~ "head-tail",
+    b == "reverse" & d == "forward" ~ "tail-tail",
+    b == "forward" & d == "reverse" ~ "head-head",
+    .default = "miss"
+    )
+    ) %>% 
+  filter(group == "head-tail" & b == "forward" | group != "head-tail") %>% 
+  distinct(n, group, .keep_all = T)
+
+combination_matrix <- combination_split %>% 
+  select(a, c, n) %>% 
+  arrange(c) %>%
+  pivot_wider(names_from = a,
+              values_from = n)
+combination_matrix <- select(combination_matrix, order(colnames(combination_matrix))) %>% 
+  mutate(across(everything(), ~replace_na(.x , 0))) %>% 
+  column_to_rownames("c")
+
+label_matrix <- combination_split %>% 
+  mutate(n = case_when(
+    group == "head-head" ~ paste0(n, "²"),
+    group == "tail-tail" ~ paste0(n, "³"),
+    .default = as.character(n)
+  )) %>% 
+  select(a, c, n) %>% 
+  arrange(c) %>%
+  pivot_wider(names_from = a,
+              values_from = n)
+label_matrix <- select(label_matrix, order(colnames(label_matrix))) %>% 
+  column_to_rownames("c")
+
+label_matrix[is.na(label_matrix)] <- ""
+label_matrix <- as.matrix(label_matrix)
+
+
+data <- as.matrix(combination_matrix)
+col_fun = colorRamp2(c(0, 1, ceiling(max(data))), c("white", "white", "firebrick"))
+
+ht <-
+  Heatmap(data,
+          col = col_fun,
+          cluster_rows = F,
+          cluster_columns = F,
+          row_names_side = "left",
+          column_names_side = "top",
+          column_names_rot = 0,
+          row_title = "second block",
+          column_title = "first block",
+          row_names_centered = T,
+          column_names_centered = T,
+          rect_gp = gpar(col = "grey25", lwd = 0.8),
+          name = "occurence",
+          cell_fun = function(j, i, x, y, w, h, col) { # add text to each grid
+            grid.text(label_matrix[i, j], x, y)
+            }
+  )
+print(ht)
+```
+Note that in the heatmap, the directionality is indicated by superscript numbers, ² indicates head to head, ³ tail to tail orientation, while head to tail orientations are not further indicated.  
+
+# ORF percentage analysis
+
+For investigation of the relative number of ORF containing reads, each read is remodeled to its own row in a data frame, Gaps and overlaps are treated as described above. If a gap occurs, an X is introduced into the string that represents the order of block on the read. If the overlap of a block and its downstream neighbor is larger than 10 bases, the block is removed from the analysis and an gap (X) is introduced.  
+Subsequently, the Block letters are concatenated and the occurrences of the substrings representing the open reading frames are counted per sequence.
+
+```{r ORF number}
+orf_reformer <- function(df){
+  df <- df %>% 
+    mutate(Name = case_when(
+             Name == "Fp" ~ "G",
+             Name == "Mp" ~ "Y",
+             Name == "Kp" ~ "Z",
+             Name == "NA" ~ "X",
+             .default = Name
+           ),
+           Name = ifelse(!is.na(lead(Minimum,1)) & abs(lead(Minimum,1) - Maximum) <= 10, Name, paste0(Name, "X")),
+           read_len = max(df$Maximum, na.rm = T)) %>% 
+    group_by(Sequence.Name) %>% 
+    summarise(sequence = paste0(Name, collapse = ""),
+              read_len = first(read_len))
+  }
+
+orfs <- mclapply(reads, orf_reformer, mc.cores = cores) %>% 
+  bind_rows()
+
+orfs_annotated <- orfs %>% 
+  mutate(coxI_n = stringi::stri_count_fixed(sequence, 'VSCQ') + stringi::stri_count_fixed(sequence, 'QCSV'),
+         coxIII_n = stringi::stri_count_fixed(sequence, 'LJBYM') + stringi::stri_count_fixed(sequence, 'MYBJL'),
+         cob_n = stringi::stri_count_fixed(sequence, 'EAT') + stringi::stri_count_fixed(sequence, 'TAE'),
+         all_orf_n = coxI_n + coxIII_n + cob_n,
+         coxI = ifelse(coxI_n > 0, T, F),
+         coxIII = ifelse(coxIII_n > 0, T, F),
+         cob = ifelse(cob_n > 0, T, F),
+         all_orf = ifelse(coxI & coxIII & cob, T, F),
+         two_orf = coxI + coxIII + cob
+         )
+
+orf_percentage <- orfs_annotated %>% 
+  summarise(coxIII = sum(coxIII) / sum(read_len >= 735),
+            cob = sum(cob) / sum(read_len >= 1107),
+            coxI = sum(coxI) / sum(read_len >= 1476),
+            all = sum(all_orf) / sum(read_len >= 3318)
+            )
+
+orf_bonus <- orfs_annotated %>% 
+  select(read_len, coxI_n, coxIII_n, cob_n, all_orf_n) %>% 
+  pivot_longer(cols = c(coxI_n, coxIII_n, cob_n, all_orf_n)) %>% 
+  group_by(name, value) %>% 
+  summarise(n = n())
+
+```
+Additionally we were interested in the behavior of all three four and five block combinations. Since the number of ORFs seemed comparably rare, we analysed the absolute occurrence of all combinations of respective length in the dataset.  
+First, at the end of each read an X is introduced, all reads are concatenate and the existing combinations are extracted. Subsequently the combination occurence is summed up and represented in a histogram.
+```{r combination comparisson}
+possible_combos <- orfs %>% 
+  filter(sequence != "NA") %>% 
+  mutate(sequence = paste0(sequence, "X"))
+
+pos_coms <- paste(possible_combos$sequence, collapse = "")
+
+# Your long string
+long_string <- pos_coms
+
+# Function to extract blocks from the long string
+get_blocks <- function(string) {
+  str_extract_all(string, "[A-Z][a-z]*")[[1]]
+}
+
+# Extract blocks from the long string
+blocks <- get_blocks(long_string)
+
+# Function to generate existing three and four block combinations (ignoring combinations with 'X')
+get_existing_combinations <- function(blocks, n) {
+  combinations <- list()
+  for (i in 1:(length(blocks) - n)) {
+    combination <- paste(blocks[i:(i + n - 1)], collapse = "")
+    if (grepl(combination, long_string) && !grepl("X", combination)) {
+      combinations[[length(combinations) + 1]] <- combination
+    }
+  }
+  unlist(combinations)
+}
+
+# Extract existing three and four block combinations (ignoring 'X' containing combinations)
+existing_three_block_combinations <- get_existing_combinations(blocks, 3) %>% 
+  unique()
+existing_four_block_combinations <- get_existing_combinations(blocks, 4) %>% 
+  unique()
+existing_five_block_combinations <- get_existing_combinations(blocks, 5) %>% 
+  unique()
+
+combination_frequency <- as.data.frame(c(existing_three_block_combinations, existing_four_block_combinations, existing_five_block_combinations)) %>% 
+  select(combo = `c(existing_three_block_combinations, existing_four_block_combinations, existing_five_block_combinations)`) %>% 
+  mutate(n_found = stringi::stri_count_fixed(long_string, combo)) %>% 
+  filter(n_found > 30) %>%
+  mutate(combo_rev = stri_reverse(combo),
+         pair = NA)
+
+for (i in (unique(combination_frequency$combo))){
+  combination_frequency <- combination_frequency %>% 
+    mutate(pair = ifelse(combo == i, i, pair),
+           pair = ifelse(combo_rev == i, i, pair))
+}
+
+combination_accumulated <- combination_frequency %>% 
+  group_by(pair) %>% 
+  summarise(n_found = sum(n_found)) %>% 
+  mutate(group = nchar(pair))
+  
+ggplot(combination_accumulated) +
+  geom_histogram(aes(x = n_found),
+                 bins = 35) +
+  facet_wrap(~group,
+             scales = "free_x") +
+  geom_vline(data = filter(combination_accumulated, group == 3), aes(xintercept = 1612), color = "firebrick") +
+  geom_vline(data = filter(combination_accumulated, group == 4), aes(xintercept = 1404), color = "firebrick") +
+  geom_vline(data = filter(combination_accumulated, group == 5), aes(xintercept = 1487), color = "firebrick") +
+  labs(title = "Total occurence of combinations in Experiment",
+       y = "N",
+       x = "Occurence") +
+  theme_bw()
+```
+The red vertical line represent the respective ORF.

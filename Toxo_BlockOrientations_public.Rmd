@@ -104,7 +104,7 @@ words_vector <- c("Apple", "Banana", "Cherry", "Dolphin", "Elephant", "Fox", "Gr
 # Create a named list using the names and words
 names_list <- setNames(words_vector, names_vector)
 
-combo_wombo <- combination_occurrence %>% 
+combo_wrangler <- combination_occurrence %>% 
   mutate(a = names_list[a],
          c = names_list[c],
          a = ifelse(b == "reverse", stri_reverse(a), a),
@@ -113,13 +113,13 @@ combo_wombo <- combination_occurrence %>%
          e2 = stri_reverse(e),
          pair = NA)
 
-for (i in (unique(combo_wombo$e))){
-  combo_wombo <- combo_wombo %>% 
+for (i in (unique(combo_wrangler$e))){
+  combo_wrangler <- combo_wrangler %>% 
     mutate(pair = ifelse(e == i, i, pair),
            pair = ifelse(e2 == i, i, pair))
 }
 
-combination_pairs <- combo_wombo %>% 
+combination_pairs <- combo_wrangler %>% 
   select(pair, block1, block2, n) %>% 
   group_by(pair) %>% 
   reframe(n = sum(n),
@@ -132,7 +132,7 @@ combination_pairs <- combo_wombo %>%
 ```{r}
 cutoff = 50
 
-combination_pairs <- combo_wombo %>% 
+combination_pairs <- combo_wrangler %>% 
   select(pair, block1, block2, n) %>% 
   group_by(pair) %>% 
   reframe(n = sum(n),
@@ -141,7 +141,7 @@ combination_pairs <- combo_wombo %>%
   select(block1, block2, n) %>% 
   arrange(desc(n))
 
-combination_pairs_single <- combo_wombo %>% 
+combination_pairs_single <- combo_wrangler %>% 
   select(pair, block1, block2, n) %>% 
   group_by(pair) %>% 
   summarise(n = sum(n),

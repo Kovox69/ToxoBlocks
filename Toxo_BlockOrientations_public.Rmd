@@ -21,15 +21,17 @@ library(ComplexHeatmap)
 library(circlize)
 library(parallel)
 
-# Enables parallel processing with the max number of cores available, on Windows machines this should do nothing but the code should run fine anyways.
-cores <- parallel::detectCores()
+# Enables parallel processing with the max number of cores available, on Windows machines this needs to be manually changed to 1
+
+# cores <- parallel::detectCores()
+cores <- 1
 ```
 
 ## Overview
 
 Nanopore sequencing was performed on Toxoplasma gondii mitochondrial DNA.  
 According to earlier publications, the toxoplasma mitochondrial genome is composed of various coding blocks that encode either parts of one of three ORFs or various sRNAs, possibly parts of the mito-ribosome.  
-Those coding blocks were mapped to the nanopore sequencing results, due to the read quality of the sequencing method, blocks were called with a 75% sequence similarity threshhold.  
+Those coding blocks were mapped to the nanopore sequencing results, due to the read quality of the sequencing method, blocks were called with a 75% sequence similarity threshold.  
 
 # Data read in
 

@@ -157,7 +157,7 @@ combo_ones <- filter(combination_pairs_single, n == 1)
 combination_pairs_filter <- filter(combination_pairs, n > cutoff)
 combination_pairs_filter_single <- filter(combination_pairs_single, n > cutoff)
 
-combination_table_supplement <- combination_pairs %>%
+combination_table_supplement <- combination_pairs_single %>%
   separate_wider_delim(block1, delim = "_", names = c("a", "b")) %>% 
   separate_wider_delim(block2, delim = "_", names = c("c", "d")) %>% 
   mutate(group = case_when(
@@ -165,12 +165,16 @@ combination_table_supplement <- combination_pairs %>%
     b == "reverse" & d == "forward" ~ "tail-tail",
     b == "forward" & d == "reverse" ~ "head-head",
     .default = "miss"
-    )
+    ),
+    e = ifelse(group == "head-tail" & b == "reverse", c, a),
+    f = ifelse(group == "head-tail" & b == "reverse", "forward", b),
+    g = ifelse(group == "head-tail" & b == "reverse", a, c),
+    h = ifelse(group == "head-tail" & b == "reverse", "forward", d)
     ) %>% 
-  filter(group == "head-tail" & b == "forward" | group != "head-tail") %>% 
-  distinct(n, group, .keep_all = T) %>% 
-  select(block1 = a, direction1 = b, block2 = c, direction2 = d, n, group) %>% 
+  select(block1 = e, direction1 = f, block2 = g, direction2 = h, n, group) %>% 
   arrange(desc(n))
+
+write.csv(combination_table_supplement, "combination_table_supplement.csv")
 
 ```
 

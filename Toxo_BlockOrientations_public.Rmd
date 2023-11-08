@@ -120,15 +120,6 @@ for (i in (unique(combo_wrangler$e))){
     mutate(pair = ifelse(e == i, i, pair),
            pair = ifelse(e2 == i, i, pair))
 }
-
-combination_pairs <- combo_wrangler %>% 
-  select(pair, block1, block2, n) %>% 
-  group_by(pair) %>% 
-  reframe(n = sum(n),
-          block1 = (block1),
-          block2 = (block2)) %>% 
-  select(block1, block2, n) %>% 
-  arrange(desc(n))
 ```
 
 ```{r}
@@ -174,7 +165,7 @@ combination_table_supplement <- combination_pairs_single %>%
   select(block1 = e, direction1 = f, block2 = g, direction2 = h, n, group) %>% 
   arrange(desc(n))
 
-write.csv(combination_table_supplement, "combination_table_supplement.csv")
+write.csv(combination_table_supplement, "tables/combination_table_supplement.csv")
 
 ```
 
@@ -184,27 +175,17 @@ In total, `r sum(combination_pairs_single$n)` pairings were identified, the remo
 ```{r plot combinations}
 print(combination_pairs_filter)
 
-combination_split <- combination_pairs_filter %>% 
-  separate_wider_delim(block1, delim = "_", names = c("a", "b")) %>% 
-  separate_wider_delim(block2, delim = "_", names = c("c", "d")) %>% 
-  mutate(group = case_when(
-    b == d ~ "head-tail",
-    b == "reverse" & d == "forward" ~ "tail-tail",
-    b == "forward" & d == "reverse" ~ "head-head",
-    .default = "miss"
-    )
-    ) %>% 
-  filter(group == "head-tail" & b == "forward" | group != "head-tail") %>% 
-  distinct(n, group, .keep_all = T)
+combination_split <- combination_table_supplement %>%
+  filter(n >= cutoff)
 
 combination_matrix <- combination_split %>% 
-  select(a, c, n) %>% 
-  arrange(c) %>%
-  pivot_wider(names_from = a,
+  select(block1, block2, n) %>% 
+  arrange(block2) %>%
+  pivot_wider(names_from = block1,
               values_from = n)
 combination_matrix <- select(combination_matrix, order(colnames(combination_matrix))) %>% 
   mutate(across(everything(), ~replace_na(.x , 0))) %>% 
-  column_to_rownames("c")
+  column_to_rownames("block2")
 
 label_matrix <- combination_split %>% 
   mutate(n = case_when(
@@ -212,12 +193,12 @@ label_matrix <- combination_split %>%
     group == "tail-tail" ~ paste0(n, "³"),
     .default = as.character(n)
   )) %>% 
-  select(a, c, n) %>% 
-  arrange(c) %>%
-  pivot_wider(names_from = a,
+  select(block1, block2, n) %>% 
+  arrange(block2) %>%
+  pivot_wider(names_from = block1,
               values_from = n)
 label_matrix <- select(label_matrix, order(colnames(label_matrix))) %>% 
-  column_to_rownames("c")
+  column_to_rownames("block2")
 
 label_matrix[is.na(label_matrix)] <- ""
 label_matrix <- as.matrix(label_matrix)
@@ -246,7 +227,46 @@ ht <-
   )
 print(ht)
 
+block_neighbor_frequencies <- combination_pairs %>% 
+  filter(n >= cutoff) %>%
+  separate_wider_delim(block1, delim = "_", names = c("block1", "direction1")) %>%
+  separate_wider_delim(block2, delim = "_", names = c("block2", "direction2")) %>%
+  mutate(group = case_when(
+    direction1 == direction2 ~ "head-tail",
+    direction1 == "reverse" & direction2 == "forward" ~ "tail-tail",
+    direction1 == "forward" & direction2 == "reverse" ~ "head-head",
+    .default = "miss"
+    ),
+    block = block1,
+    down = ifelse(direction1 == "forward", block2, NA),
+    up = ifelse(direction1 == "reverse", block2, NA)
+  ) %>% 
+  select(up, block, down, n, group) %>% 
+  group_by(block) %>%
+  group_split()
 
+neighbor_frequency <- function(df){
+  if(nrow(df) <= 2){
+    df <- NULL
+  }
+  else {
+    df <- df %>% 
+      mutate(up_f = ifelse(!is.na(up), n/sum(n[!is.na(up)]), NA),
+             dwn_f = ifelse(!is.na(down), n/sum(n[!is.na(down)]), NA),
+             up = ifelse(group != "head-tail" & !is.na(up), paste0(up, "*"), up),
+             down = ifelse(group != "head-tail" & !is.na(down), paste0(down, "*"), down)) %>% 
+      select(up_f, up, block, down, dwn_f, n)
+  }
+}
+
+block_neighbor_frequencies_supplement <- mclapply(block_neighbor_frequencies, neighbor_frequency, mc.cores = cores) %>% 
+  bind_rows() %>% 
+  mutate(color = (col_fun(n)),
+         col = paste(as.vector(col2rgb(color)), collapse = " ")) %>% 
+  arrange(block, desc(n))
+
+write.csv(block_neighbor_frequencies_supplement, "tables/block_neighbor_frequencies_supplement.csv")
+Heatmap()
 ```
 Note that in the heatmap, the directionality is indicated by superscript numbers, ² indicates head to head, ³ tail to tail orientation, while head to tail orientation is not further indicated.  
 
@@ -307,7 +327,7 @@ orf_supplement_table <- orfs_annotated %>%
     frequency = n / possible_reads) %>% 
   select(ORF = name, length, possible_reads, found_reads = n, frequency)
 
-write.csv(orf_supplement_table, file = "ORF_supplement_table.csv", row.names = F)
+write.csv(orf_supplement_table, file = "tables/ORF_supplement_table.csv")
 
 orf_bonus <- orfs_annotated %>% 
   select(read_len, coxI_n, coxIII_n, cob_n, all_orf_n) %>% 

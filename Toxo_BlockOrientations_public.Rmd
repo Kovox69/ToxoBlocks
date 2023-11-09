@@ -38,7 +38,7 @@ Those coding blocks were mapped to the nanopore sequencing results, due to the r
 The mapping was done with Geneious, the mapped features including their start and end positions and direction were exported as .tsv
 
 ```{r data import}
-raw <- read.delim("finalMitoReads_annotations.tsv")
+raw <- read.delim("data/finalMitoReads_annotations.tsv")
 ```
 
 ## Separate Reads
@@ -148,7 +148,7 @@ combo_ones <- filter(combination_pairs_single, n == 1)
 combination_pairs_filter <- filter(combination_pairs, n > cutoff)
 combination_pairs_filter_single <- filter(combination_pairs_single, n > cutoff)
 
-combination_table_supplement <- combination_pairs_single %>%
+combination_table_cleaned <- combination_pairs_single %>%
   separate_wider_delim(block1, delim = "_", names = c("a", "b")) %>% 
   separate_wider_delim(block2, delim = "_", names = c("c", "d")) %>% 
   mutate(group = case_when(
@@ -165,7 +165,6 @@ combination_table_supplement <- combination_pairs_single %>%
   select(block1 = e, direction1 = f, block2 = g, direction2 = h, n, group) %>% 
   arrange(desc(n))
 
-write.csv(combination_table_supplement, "tables/combination_table_supplement.csv")
 
 ```
 
@@ -175,7 +174,7 @@ In total, `r sum(combination_pairs_single$n)` pairings were identified, the remo
 ```{r plot combinations}
 print(combination_pairs_filter)
 
-combination_split <- combination_table_supplement %>%
+combination_split <- combination_table_cleaned %>%
   filter(n >= cutoff)
 
 combination_matrix <- combination_split %>% 
@@ -226,47 +225,6 @@ ht <-
             }
   )
 print(ht)
-
-block_neighbor_frequencies <- combination_pairs %>% 
-  filter(n >= cutoff) %>%
-  separate_wider_delim(block1, delim = "_", names = c("block1", "direction1")) %>%
-  separate_wider_delim(block2, delim = "_", names = c("block2", "direction2")) %>%
-  mutate(group = case_when(
-    direction1 == direction2 ~ "head-tail",
-    direction1 == "reverse" & direction2 == "forward" ~ "tail-tail",
-    direction1 == "forward" & direction2 == "reverse" ~ "head-head",
-    .default = "miss"
-    ),
-    block = block1,
-    down = ifelse(direction1 == "forward", block2, NA),
-    up = ifelse(direction1 == "reverse", block2, NA)
-  ) %>% 
-  select(up, block, down, n, group) %>% 
-  group_by(block) %>%
-  group_split()
-
-neighbor_frequency <- function(df){
-  if(nrow(df) <= 2){
-    df <- NULL
-  }
-  else {
-    df <- df %>% 
-      mutate(up_f = ifelse(!is.na(up), n/sum(n[!is.na(up)]), NA),
-             dwn_f = ifelse(!is.na(down), n/sum(n[!is.na(down)]), NA),
-             up = ifelse(group != "head-tail" & !is.na(up), paste0(up, "*"), up),
-             down = ifelse(group != "head-tail" & !is.na(down), paste0(down, "*"), down)) %>% 
-      select(up_f, up, block, down, dwn_f, n)
-  }
-}
-
-block_neighbor_frequencies_supplement <- mclapply(block_neighbor_frequencies, neighbor_frequency, mc.cores = cores) %>% 
-  bind_rows() %>% 
-  mutate(color = (col_fun(n)),
-         col = paste(as.vector(col2rgb(color)), collapse = " ")) %>% 
-  arrange(block, desc(n))
-
-write.csv(block_neighbor_frequencies_supplement, "tables/block_neighbor_frequencies_supplement.csv")
-Heatmap()
 ```
 Note that in the heatmap, the directionality is indicated by superscript numbers, ² indicates head to head, ³ tail to tail orientation, while head to tail orientation is not further indicated.  
 
@@ -314,21 +272,6 @@ orf_percentage <- orfs_annotated %>%
             all = sum(all_orf) / sum(read_len >= 3318)
             )
 
-orf_supplement_table <- orfs_annotated %>% 
-  select(coxI, coxIII, cob) %>% 
-  pivot_longer(cols = c(coxI, coxIII, cob)) %>% 
-  group_by(name) %>%
-  summarise(n = sum(value)) %>% 
-  mutate(length = case_when(
-    name == "coxI" ~ 1476,
-    name == "coxIII" ~ 735,
-    name == "cob" ~ 1107),
-    possible_reads = sapply(length, function(x) length(orfs$read_len[orfs$read_len >= x])),
-    frequency = n / possible_reads) %>% 
-  select(ORF = name, length, possible_reads, found_reads = n, frequency)
-
-write.csv(orf_supplement_table, file = "tables/ORF_supplement_table.csv")
-
 orf_bonus <- orfs_annotated %>% 
   select(read_len, coxI_n, coxIII_n, cob_n, all_orf_n) %>% 
   pivot_longer(cols = c(coxI_n, coxIII_n, cob_n, all_orf_n)) %>% 
@@ -336,17 +279,15 @@ orf_bonus <- orfs_annotated %>%
   summarise(n = n())
 
 ```
+
 Additionally we were interested in the behavior of all three four and five block combinations. Since the number of ORFs seemed comparably rare, we analysed the absolute occurrence of all combinations of respective length in the dataset.  
-First, at the end of each read an X is introduced, all reads are concatenate and the existing combinations are extracted. Subsequently the combination occurence is summed up and represented in a histogram.
+First, at the end of each read an X is introduced, all reads are concatenate and the existing combinations are extracted. Subsequently the combination occurrence is summed up and represented in a histogram.  
 ```{r combination comparisson}
 possible_combos <- orfs %>% 
   filter(sequence != "NA") %>% 
   mutate(sequence = paste0(sequence, "X"))
 
 pos_coms <- paste(possible_combos$sequence, collapse = "")
-
-# Your long string
-long_string <- pos_coms
 
 # Function to extract blocks from the long string
 get_blocks <- function(string) {
@@ -356,7 +297,7 @@ get_blocks <- function(string) {
 # Extract blocks from the long string
 blocks <- get_blocks(long_string)
 
-# Function to generate existing three and four block combinations (ignoring combinations with 'X')
+# Function to generate existing block combinations (ignoring combinations with 'X')
 get_existing_combinations <- function(blocks, n) {
   combinations <- list()
   for (i in 1:(length(blocks) - n)) {
@@ -407,4 +348,65 @@ ggplot(combination_accumulated) +
        x = "Occurence") +
   theme_bw()
 ```
+
 The red vertical line represent the respective ORF.
+
+## Creating supplementary tables
+```{r supplementary tables}
+block_neighbor_frequencies <- combination_pairs %>% 
+  filter(n >= cutoff) %>%
+  separate_wider_delim(block1, delim = "_", names = c("block1", "direction1")) %>%
+  separate_wider_delim(block2, delim = "_", names = c("block2", "direction2")) %>%
+  mutate(group = case_when(
+    direction1 == direction2 ~ "head-tail",
+    direction1 == "reverse" & direction2 == "forward" ~ "tail-tail",
+    direction1 == "forward" & direction2 == "reverse" ~ "head-head",
+    .default = "miss"
+    ),
+    block = block1,
+    down = ifelse(direction1 == "forward", block2, NA),
+    up = ifelse(direction1 == "reverse", block2, NA)
+  ) %>% 
+  select(up, block, down, n, group) %>% 
+  group_by(block) %>%
+  group_split()
+
+neighbor_frequency <- function(df){
+  if(nrow(df) <= 2){
+    df <- NULL
+  }
+  else {
+    df <- df %>% 
+      mutate(up_f = ifelse(!is.na(up), n/sum(n[!is.na(up)]), NA),
+             dwn_f = ifelse(!is.na(down), n/sum(n[!is.na(down)]), NA),
+             up = ifelse(group != "head-tail" & !is.na(up), paste0(up, "*"), up),
+             down = ifelse(group != "head-tail" & !is.na(down), paste0(down, "*"), down)) %>% 
+      select(up_f, up, block, down, dwn_f, n)
+  }
+}
+
+block_neighbor_frequencies_supplement <- mclapply(block_neighbor_frequencies, neighbor_frequency, mc.cores = cores) %>% 
+  bind_rows() %>% 
+  mutate(color = (col_fun(n)),
+         col = paste(as.vector(col2rgb(color)), collapse = " ")) %>% 
+  arrange(block, desc(n))
+
+write.csv(block_neighbor_frequencies_supplement, "tables/block_neighbor_frequencies_supplement.csv")
+
+write.csv(combination_table_cleaned, "tables/combination_table_supplement.csv")
+
+orf_supplement_table <- orfs_annotated %>% 
+  select(coxI, coxIII, cob) %>% 
+  pivot_longer(cols = c(coxI, coxIII, cob)) %>% 
+  group_by(name) %>%
+  summarise(n = sum(value)) %>% 
+  mutate(length = case_when(
+    name == "coxI" ~ 1476,
+    name == "coxIII" ~ 735,
+    name == "cob" ~ 1107),
+    possible_reads = sapply(length, function(x) length(orfs$read_len[orfs$read_len >= x])),
+    frequency = n / possible_reads) %>% 
+  select(ORF = name, length, possible_reads, found_reads = n, frequency)
+
+write.csv(orf_supplement_table, file = "tables/ORF_supplement_table.csv")
+```

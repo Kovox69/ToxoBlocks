@@ -1,16 +1,3 @@
----
-title: "Toxo_BlockOrientations_public"
-author: "Sascha Maschmann"
-date: "`r Sys.Date()`"
-output:
-  html_document:
-    toc: true
-    depth: 2
-    toc_float:
-      collapsed: false
-      smooth_scroll: false
----
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 

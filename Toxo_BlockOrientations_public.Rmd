@@ -186,21 +186,19 @@ combination_matrix <- select(combination_matrix, order(colnames(combination_matr
   mutate(across(everything(), ~replace_na(.x , 0))) %>% 
   column_to_rownames("block2")
 
-label_matrix <- combination_split %>% 
-  mutate(n = case_when(
-    group == "head-head" ~ paste0(n, "²"),
-    group == "tail-tail" ~ paste0(n, "³"),
-    .default = as.character(n)
-  )) %>% 
-  select(block1, block2, n) %>% 
+symbol_matrix <- combination_split %>% 
+  select(block1, block2, group) %>% 
   arrange(block2) %>%
   pivot_wider(names_from = block1,
-              values_from = n)
-label_matrix <- select(label_matrix, order(colnames(label_matrix))) %>% 
+              values_from = group)
+symbol_matrix <- select(symbol_matrix, order(colnames(symbol_matrix))) %>% 
   column_to_rownames("block2")
 
-label_matrix[is.na(label_matrix)] <- ""
-label_matrix <- as.matrix(label_matrix)
+symbol_matrix[symbol_matrix == "head-head"] <- "●"
+symbol_matrix[symbol_matrix == "tail-tail"] <- "↔"
+symbol_matrix[symbol_matrix == "head-tail"] <- " "
+symbol_matrix[is.na(symbol_matrix)] <- " "
+symbol_matrix <- as.matrix(symbol_matrix)
 
 
 data <- as.matrix(combination_matrix)
@@ -221,10 +219,12 @@ ht <-
           rect_gp = gpar(col = "grey25", lwd = 0.8),
           name = "occurence",
           cell_fun = function(j, i, x, y, w, h, col) { # add text to each grid
-            grid.text(label_matrix[i, j], x, y)
+            grid.text(symbol_matrix[i, j], x, y)
             }
   )
 print(ht)
+
+
 ```
 Note that in the heatmap, the directionality is indicated by superscript numbers, ² indicates head to head, ³ tail to tail orientation, while head to tail orientation is not further indicated.  
 
@@ -295,14 +295,14 @@ get_blocks <- function(string) {
 }
 
 # Extract blocks from the long string
-blocks <- get_blocks(long_string)
+blocks <- get_blocks(pos_coms)
 
 # Function to generate existing block combinations (ignoring combinations with 'X')
 get_existing_combinations <- function(blocks, n) {
   combinations <- list()
   for (i in 1:(length(blocks) - n)) {
     combination <- paste(blocks[i:(i + n - 1)], collapse = "")
-    if (grepl(combination, long_string) && !grepl("X", combination)) {
+    if (grepl(combination, pos_coms) && !grepl("X", combination)) {
       combinations[[length(combinations) + 1]] <- combination
     }
   }
@@ -319,7 +319,7 @@ existing_five_block_combinations <- get_existing_combinations(blocks, 5) %>%
 
 combination_frequency <- as.data.frame(c(existing_three_block_combinations, existing_four_block_combinations, existing_five_block_combinations)) %>% 
   select(combo = `c(existing_three_block_combinations, existing_four_block_combinations, existing_five_block_combinations)`) %>% 
-  mutate(n_found = stringi::stri_count_fixed(long_string, combo)) %>% 
+  mutate(n_found = stringi::stri_count_fixed(pos_coms, combo)) %>% 
   filter(n_found > 30) %>%
   mutate(combo_rev = stri_reverse(combo),
          pair = NA)

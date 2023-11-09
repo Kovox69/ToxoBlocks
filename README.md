@@ -1,5 +1,5 @@
 # Overview
-This repository is part of the supplemental informtaion on [Ribosomal Incorporation of Short RNAs from Mitochondrial Genome Recombination Sites in Toxoplasma gondii](https://www.biorxiv.org/content/10.1101/2023.09.02.556019v1).
+This repository is part of the supplemental information on [Ribosomal Incorporation of Short RNAs from Mitochondrial Genome Recombination Sites in Toxoplasma gondii](https://www.biorxiv.org/content/10.1101/2023.09.02.556019v1).
 In brief we identified Toxoplasma gondii mitochondiral coding blocks on nanopore seqeuncing reads and investigated their pairings and orientations.
 
 ## Repository overview
